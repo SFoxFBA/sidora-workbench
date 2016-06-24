@@ -2,7 +2,6 @@ window.batchRequests = [];
 jQuery().ready(function(){
   window.currentInfo = {};
   var myLoc = decodeURIComponent(window.location.pathname);
-	console.log(myLoc);
   if (myLoc.indexOf("edit_metadata")>0){
     window.currentInfo.type = "EditMetadata";
     // need to send this to sidora queue done() to force a refresh after edit metadata is finished
@@ -111,7 +110,6 @@ window.submitAll=function(){
       var toConsole = function(){console.log('finished');};  // create resource success function
       window.prepIslandoraFormForSubmit(formId, toConsole );
     }else{
-      console.log("in submitAll function");
 			var toConsole = function(){sidora.concept.forceRefreshOnNextLoadContent = true;sidora.concept.LoadContent();};
       var onFailure = function(){jQuery("#edit-update").click();};
 			var sidora = window.parent.sidora;
@@ -122,10 +120,9 @@ window.submitAll=function(){
 			  window.parent.jQuery('#queueMessage').find('.notification-window-message').find('a[class="' + jQuery("[name='Pid']").val() + '"]').parent().remove();
 				if (sidora.queue.completedFailedRequests.length == 0){
 				  window.parent.jQuery('#queueMessage').fadeOut('fast');
+					sidora.queue.NotificationWindow.ResetError(false);
 				}	
-				
-			if ((typeof(sidora.queue) != "undefined") && (sidora.queue.completedFailedRequests.length > 0){	
-			console.log(sidora.queue.completedFailedRequests[0]);
+			}	
       window.prepIslandoraFormForSubmit(formId, toConsole, onFailure);
     } 
   }

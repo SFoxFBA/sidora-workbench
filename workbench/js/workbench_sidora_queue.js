@@ -76,7 +76,7 @@ SidoraQueue.prototype.SidoraRequest = function(sidoraRequest){
 SidoraQueue.prototype.Fail = function(completedItem, ajaxReturn){
   completedItem.ajaxReturn = ajaxReturn;
   this.completedRequests.push(completedItem);
-  this.completedFailedRequests.push(completedItem);
+  this.completedFailedRequests.push({pid:completedItem.pidsBeingProcessed[0],form:completedItem})
   this.NotificationWindow.Show("FAILED: " + completedItem.userFriendlyName);
   console.log("fail:"+ajaxReturn[0].status);
   if (ajaxReturn[0].status == '500'){
@@ -100,8 +100,6 @@ SidoraQueue.prototype.Fail = function(completedItem, ajaxReturn){
 SidoraQueue.prototype.Retry = function(pid) {
   jQuery('#edit_form').remove();
 	jQuery("body").append("<div id='edit_form' style='visibility:hidden;'></div>");
-	//jQuery('body').append('<div id="edit_error" style = "visibility:hidden;"></div>');
-	//jQuery('#edit_error').html(jQuery(test).find('.messages.error'));
 	var failedForm = sidora.queue.completedFailedRequests.filter(function (obj){ return obj.pid === pid;})[0];
 	jQuery("#edit_form").text(failedForm.form)
 	Shadowbox.close();
@@ -191,7 +189,6 @@ SidoraQueue.prototype.NotificationWindow.Show = function(message, isError){
   if (jQuery('#queueMessage').length == 0){
     var notificationWindowHtml = '<div id="queueMessage" style="display:none; position: fixed; bottom: 26px; right: 30px; min-height: 50px; width: 400px;"><div id="" role="tooltip" class="queue-message-block ui-tooltip ui-widget ui-corner-all ui-widget-content" style=" display: block;width: 100%;height: 100%;max-width: 1000px;"><div class="notification-window-message"></div><div class="queue-mb-close" style="background: url(/sites/all/modules/islandora_xml_forms-7.x/elements/css/images/ui-icons_222222_256x240.png) no-repeat -30px -191px;width: 20px;height: 20px;z-index: 100;position: absolute;right: 0;top: 0;"></div></div></div>';
     jQuery("body").append(notificationWindowHtml);
-		if (!(isError) && !(nw.showingError)){
       jQuery("#queueMessage").mouseenter(function(){
 			  nw.MouseIsInside = true;
         nw.UpdateTime = Date.now();
@@ -204,7 +201,6 @@ SidoraQueue.prototype.NotificationWindow.Show = function(message, isError){
         setTimeout(function(){nw.CheckHide();}, nw.SecondsOnScreen * 1000);
         //User removed mouse from the div, start the countdown to hiding it
       });
-		}	
     jQuery(".queue-mb-close").click(function(){nw.showingError = false; nw.Hide();});
   }
   jQuery(".notification-window-message div:hidden").remove();
@@ -217,6 +213,8 @@ SidoraQueue.prototype.NotificationWindow.Show = function(message, isError){
   this.UpdateTime = Date.now();
   if (isError || nw.showingError){
     nw.showingError = true;
+		jQuery("#queueMessage").unbind('mouseenter');
+		jQuery("#queueMessage").unbind('mouseleave');
   }else{
     setTimeout(function(){nw.CheckHide();}, this.SecondsOnScreen * 1000);
   }
@@ -235,6 +233,10 @@ SidoraQueue.prototype.NotificationWindow.Hide = function(){
   jQuery("#queueMessage").fadeOut('fast');
   jQuery(".notification-window-message").children().fadeOut('fast');
 }
+SidoraQueue.prototype.NotificationWindow.ResetError = function(queuedErrors){
+  var nw = this;
+	nw.showingError = queuedErrors;
+}	
 SidoraQueue.prototype.updateFooterWithRequestInProcess = function(){
   if (this.requestInProcess != null && !this.requestInProcess.isSilent){
     if (!jQuery("footer").is(":visible")) jQuery("footer").fadeIn();
