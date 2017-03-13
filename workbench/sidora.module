@@ -449,19 +449,19 @@ function sidora_management_panel($pid, $show_or_save = 'show', $dsid_to_remove =
     } 
     $label = filter_input(INPUT_POST, 'label', FILTER_SANITIZE_STRING);
     $identifier = filter_input(INPUT_POST, 'identifier', FILTER_SANITIZE_URL);
+    $state = filter_input(INPUT_POST, 'state', FILTER_SANITIZE_URL);
+    $mime_detect = new MimeDetect();
+    $current_uploads = sidora_create_resource_get_current_uploads();
+    $mimeType = $mime_detect->getMimeType($current_uploads[0]->filepath);
     if (strtoupper($identifier) == 'OBJ'){
       $object = sidora_obj($pid);
       if (!$object[$identifier]->versionable){
        $object[$identifier]->versionable = true;
       }
       if (empty($label)){
-        $label = $object[$identifier]->label;
+        $label = $current_uploads[0]->filename;
       }	
     }	
-    $state = filter_input(INPUT_POST, 'state', FILTER_SANITIZE_URL);
-    $mime_detect = new MimeDetect();
-    $current_uploads = sidora_create_resource_get_current_uploads();
-    $mimeType = $mime_detect->getMimeType($current_uploads[0]->filepath);
     sidora_management_ingest($pid, $identifier, $label, $mimeType);
     $to_return = 'complete';
     return $to_return;
@@ -876,8 +876,8 @@ function sidora_after_ingest_processing(AbstractObject $object) {
   }
   */
   if (array_key_exists('form_build_id', $_POST)) {
-    sidora_object_creation_info($submitted_form_build_id, 'pid', $object->id);
     $submitted_form_build_id = $_POST['form_build_id'];
+    sidora_object_creation_info($submitted_form_build_id, 'pid', $object->id);
     $all_meta_entered = filter_input(INPUT_POST, 'all_meta_entered', FILTER_SANITIZE_URL);
     if ($all_meta_entered != 'TRUE') $all_meta_entered = 'FALSE';
     sidora_object_creation_info($submitted_form_build_id, 'all_meta_entered', $all_meta_entered);
@@ -2573,7 +2573,7 @@ function sidora_testing($one = 'one', $two = 'two', $parent_pid = 'si:root', $ex
     print $modules;
   }
   if ($one == 'xsl_config') {
-    $pid = $two;
+		$pid = $two;
     dsm($pid);
     $obj = sidora_obj($pid);
     dsm($obj);
@@ -3057,7 +3057,7 @@ watchdog('SIdora Testing',t("Bulk metadata Curl reponse whole :<br/> %curl_respo
     }
   }
 	}
-  //This ends the testing function and should also indicate the end of liberal use of the dsm function
+	//This ends the testing function and should also indicate the end of liberal use of the dsm function
 }
 
 /*
@@ -4517,11 +4517,14 @@ function sidora_get_xsl_file_config_for_object($pid) {
  * Returns the XSL file filename to use for this pid
  */
 function sidora_get_xsl_file_for_object($pid) {
+  $curr_check = sidora_get_xsl_exhibition_config_for_object($pid);
+  if ((!empty($curr_check)) && ($curr_check != 'none') && ($curr_check != 'direct') && (file_exists($curr_check))) {
+    return $curr_check;
+  }	 
   $curr_check = sidora_get_xsl_file_config_for_object($pid);
   if (empty($curr_check)) return NULL;
-  return $curr_check->file;
+  return (DRUPAL_ROOT . '/'. drupal_get_path('module','sidora') . '/XSL/' . $curr_check->file);
 }
-
 /*
  * If an item's ancestry (parent/grandparent/etc) includes an exhibition, then the item is allowed to be shown by exhibition
  * So this checks up the tree to find if there is an exhibition somewhere in the object's ancestry.
@@ -4623,9 +4626,9 @@ function sidora_open_access($info_type, $pid) {
         print sidora_xsl_string($xsl_file);
       }
       else {
-        $directory_for_xsl = DRUPAL_ROOT.'/'.drupal_get_path('module','sidora').'/XSL';
-        $full_file = ($directory_for_xsl . '/' . $file);
-        if ($file) $output_info = readfile($full_file);
+	//$directory_for_xsl = DRUPAL_ROOT.'/'.drupal_get_path('module','sidora').'/XSL';
+        //$full_file = ($directory_for_xsl . '/' . $file);
+        if ($file) $output_info = readfile($file);
       }
       break;
     case 'xsl_config':
@@ -10401,4 +10404,15 @@ function sidora_get_nested_title_field($field_array,$parent_array) {
     return (drupal_array_get_nested_value($parent_array,$field_array));
   }
   return;
+}
+function sidora_get_xsl_exhibition_config_for_object($pid) {
+  $exhibition_config_xsl_file = '';
+  if ((isset($pid)) && (!empty($pid))) {
+    $exhibition_data = exhibition_config_get_config_data($pid);
+    if (!(empty($exhibition_data)) && !(is_null($exhibition_data['pid'])) && !(is_null($exhibition_data['last_published'])) && ($exhibition_data['last_published'] != '')){
+      $exhibition_config_publish_settings = unserialize($exhibition_data['last_published']);
+      $exhibition_config_xsl_file =  $exhibition_config_publish_settings['xslt'];
+     }
+   }
+   return $exhibition_config_xsl_file;
 }
