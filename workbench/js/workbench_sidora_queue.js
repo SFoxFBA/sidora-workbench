@@ -29,7 +29,7 @@ SidoraQueue.prototype.showMessage = function(message){
  * the last resource in the queue.
  * Also, when a concept is deleted, the window url needs to change to the parent 
  * pid so Sidora.Concept.LoadContent loads the metadata for the parent pid. The 
- * done funtion of Sidora queue checks the action property to accomplish this functionality.
+ * done function of Sidora queue checks the action property to accomplish this functionality.
 */ 
 SidoraQueue.prototype.RequestPost = function(userFriendlyName, ajaxRequestUrl, postData, doneFunction, failFunction, pidsBeingProcessed, action, requestStat){
   action = typeof action !== 'undefined' ? action : '';

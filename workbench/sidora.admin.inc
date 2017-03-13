@@ -160,7 +160,18 @@ jQuery("#edit-sidora-resource-ontology-json").on(\'change keyup paste\', functio
   $form_names_dd .= '<option value="sidora_all">All forms that are not specifically called out</option>';
   foreach($names as $form_info){ $name = $form_info['name']; $form_names_dd .= '<option value="'.$name.'">'.$name.'</option>'; }
   $form_names_dd .= '</select>';
-  $model_names = islandora_get_content_model_names();
+  //$model_names = islandora_get_content_model_names(); //SFOX should this be gotten from the concept/resource JSON strings?
+  //SFOX my replacement
+  $sidora_ontology_json = variable_get('sidora_ontology_json', sidora_ontology_json_default());
+  $concepts = json_decode($sidora_ontology_json);
+  foreach ($concepts as $concept) {
+    $model_names[$concept->model] = $concept->model;
+  }
+  $sidora_resource_ontology_json = variable_get('sidora_resource_ontology_json', sidora_resource_ontology_json_default());
+  $resources = json_decode($sidora_resource_ontology_json);
+  foreach ($resources as $resource) {
+    $model_names[$resource->model] = $resource->model;
+  }
 
   $model_names_dd = '<select class="model-names-dd form-select">';
   $model_names_dd .= '<option value="sidora_all">All models that are not specifically called out</option>';
@@ -590,6 +601,20 @@ tr.removed.odd {
      ),	
     ),
   );
+  //SFOX FBA addition
+  $form['sidora_one_form_per_uploaded_file'] = array(
+    '#type' => 'checkbox',
+    '#title' => 'One metadata form per uploaded file',
+    '#description' => t('By default, each uploaded file gets a separate metadata form. Unchecking this box turns off that feature.'),
+    '#default_value' => variable_get('sidora_one_form_per_uploaded_file', 1), // for default checked and false is not checked      
+  );
+  $form['sidora_delete_or_purge'] = array(
+    '#type' => 'checkbox',
+    '#title' => 'Purge object instead of marking as deleted',
+    '#description' => t('By default, when deleting, each object gets marked as deleted in Fedora Commons, rather than getting purged. Checking this box will purge objects rather than marking with status D.'),
+    '#default_value' => variable_get('sidora_delete_or_purge', 0), // for default unchecked and zero is not checked      
+  );
+  //\SFOX FBA addition
   $form['#attributes'] = array('OnSubmit' => 'formPreSubmit();');
   $form['sidora_links'] = array(
     '#markup' => '<ul id="sidora-admin-links"><h2>' . t('Administrative Links') .'</h2>

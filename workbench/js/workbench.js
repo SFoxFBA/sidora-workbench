@@ -272,6 +272,88 @@ sidora.concept.LoadContentHelp.Exhibition_view = function(conceptOfInterest){
     }
   });
 }
+/* 
+ * Sets the visibility of the concepts listed in the "add concept" menu - SF 2016/04/05
+ * 
+ * @param {type} conceptOfInterest
+ * 
+ */
+sidora.concept.LoadContentHelp.Concept_view = function (conceptOfInterest) {
+    jQuery.ajax(
+            {
+                dataType: "json",
+                url: Drupal.settings.basePath + 'sidora/info/' + conceptOfInterest + '/getcmodel',
+                success: function (returnedText) {
+                    var conceptlabel = returnedText.conceptlabel;
+                    var Aobjid = "FBAActivity";
+                    var Dobjid = "FBADataset";
+                    /*SFOX Can't work out how to elegantly disable the click, so 
+                     * doing a brute force hide for now 
+                     */
+
+                    switch (conceptlabel) {
+                        case "FBA Project":
+                        {
+                            jQuery("#" + Aobjid).show();
+                            jQuery("#" + Aobjid).children('a').show();
+                            jQuery("#" + Dobjid).hide();
+                            jQuery("#" + Dobjid).children('a').hide();
+                            jQuery("#concept-create").show();
+                            break;
+                        }
+                        case "FBA Dataset":
+                        {
+                            jQuery("#" + Aobjid).hide();
+                            jQuery("#" + Aobjid).children('a').hide();
+                            jQuery("#" + Dobjid).hide();
+                            jQuery("#" + Dobjid).children('a').hide();
+                            jQuery("#concept-create").hide();
+                            break;
+                        }
+                        default:
+                        {
+                            jQuery("#" + Aobjid).show();
+                            jQuery("#" + Aobjid).children('a').show();
+                            jQuery("#" + Dobjid).show();
+                            jQuery("#" + Dobjid).children('a').show();
+                            jQuery("#concept-create").show();
+                        }
+                    }
+                }
+            }
+    );
+}
+/*
+ * Code to choose when to show and hide the Resource list tab
+ * Dataset = show, all other concepts = hide
+ * 
+ * @param {type} conceptOfInterest
+ */
+sidora.concept.LoadContentHelp.ResourceList_view = function (conceptOfInterest) {
+    jQuery.ajax(
+            {
+                dataType: "json",
+                url: Drupal.settings.basePath + 'sidora/info/' + conceptOfInterest + '/getcmodel',
+                success: function (returnedText) {
+                    var conceptlabel = returnedText.conceptlabel;
+                    var objid1 = "ui-id-1"; //Concept Overview tab
+                    var objid3 = "ui-id-3"; //Resource List tab
+                    switch (conceptlabel) {
+                        case "FBA Dataset":
+                        {
+                            jQuery("#" + objid3).show();
+                            break;
+                        }
+                        default:
+                        {
+                            jQuery("#" + objid3).hide();
+                            jQuery("#" + objid1).click(); //Force the first tab to be active
+                        }
+                    }
+                }
+            }
+    );
+}
 /*
  * Loads the concept relationships screen for the concept
  */
@@ -428,7 +510,9 @@ sidora.concept.LoadContent = function(leaveContentIfAlreadyLoaded){
   sidora.concept.LoadContentHelp.Metadata(conceptOfInterest);
   sidora.concept.LoadContentHelp.FullTableReload(conceptOfInterest);
   sidora.concept.loadedContentPid = conceptOfInterest;
+    sidora.concept.LoadContentHelp.Concept_view(conceptOfInterest); //SFOX
   sidora.ReformatPage();
+    sidora.concept.LoadContentHelp.ResourceList_view(conceptOfInterest); //SFOX
 }
 /*
  * Used to see if there is at least a tag in there someplace
@@ -1287,16 +1371,13 @@ sidora.resources.refreshSelectedResourceThumbnail = function(){
       var pidThumbnail = Drupal.settings.basePath+"sidora/info/"+toRefreshPid+"/meta/TN/browser";
       jQuery.ajax(pidThumbnail,{
         complete:function(res){
-         var currType = res.getResponseHeader("content-type");
-         if ((currType.indexOf("image") != -1) || (currType.indexOf("jpg") != -1)){ // video and audio TN have a jpg mimetype
-          me.children("td").children("div.resource-list-tn").children("img").remove();
-	  me.children("td").children("div.resource-list-tn").append('<div id="gray_overlay" style="background-color:rgba(0,0,0,1);opacity:0.5;width:150px;height:90px;">');
-          jQuery("#gray_overlay").append('<div id="sb-loading"><div id="sb-loading-inner"><span>&nbsp;</span></div></div>');
-	  setTimeout(function(){
+         me.children("td").children("div.resource-list-tn").children("img").remove();
+	 me.children("td").children("div.resource-list-tn").append('<div id="gray_overlay" style="background-color:rgba(0,0,0,1);opacity:0.5;width:150px;height:90px;">');
+         jQuery("#gray_overlay").append('<div id="sb-loading"><div id="sb-loading-inner"><span>&nbsp;</span></div></div>');
+	 setTimeout(function(){
            me.children("td").children("div.resource-list-tn").append('<img style="max-height:90px;max-width:150px;display:none;">');
 	   me.children("td").children("div.resource-list-tn").children("img").load(function(){jQuery("#gray_overlay").remove();me.children("td").children("div.resource-list-tn").children("img").css("display","");}).attr("src",pidThumbnail+"?random="+new Date().getTime());
-	  },15000);
-	 }
+	 },10000);
         }
       });
   }
@@ -1460,7 +1541,9 @@ sidora.ontology._createSubmenu = function(ontologyChildren){
       else {
        classIcon = '&nbsp;&nbsp;';
       }  
-      toReturn += ("<li title='"+obj.description+"' class=''><a onclick='return false;' href='#'"+model+formName+ontologyId+" class="+classDisabled+">"+key.replace(/ /g, '&nbsp;')+classIcon+"</a>"+childrenHtml+"</li>\n");
+            //SFOX add an id, so options can be greyed out
+            var objid = obj.description.replace(/\s+/g, '');
+            toReturn += ("<li id='" + objid + "' title='" + obj.description + "' class=''><a onclick='return false;' href='#'" + model + formName + ontologyId + " class=" + classDisabled + ">" + key.replace(/ /g, '&nbsp;') + classIcon + "</a>" + childrenHtml + "</li>\n");
     }
   }
   return toReturn;

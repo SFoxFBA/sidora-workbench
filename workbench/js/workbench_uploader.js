@@ -27,11 +27,16 @@ jQuery().ready(function(){
   jQuery(".sidora-ingest-form-holder").hide();
   jQuery(".sidora-ingest-form-holder").first().show();
   window.currentlyShownIndex = 0;
+    //SFOX need code in here to check SIdora configuration for one uploaded file or multiple uploaded files per object
+    //SFOX and hide the prev/next buttons
+    var uploadformflag = jQuery(".sidora_one_form_per_uploaded_file").attr("value");
+    if (uploadformflag === 1) {
   if (jQuery(".sidora-ingest-form-holder").length >1){
     jQuery(".top-panel").append("<input value=\"Prev\" class='form-submit sidora-form-button sidora-form-prev'></input>");
     jQuery(".bottom-panel").append("<input value=\"Prev\" class='form-submit sidora-form-button sidora-form-prev'></input>");
     jQuery(".top-panel").append("<input value=\"Next\" class='form-submit sidora-form-button sidora-form-next'></input>");
     jQuery(".bottom-panel").append("<input value=\"Next\" class='form-submit sidora-form-button sidora-form-next'></input>");
+        }
   }   
   jQuery(".sidora-form-prev").first().addClass("form-button-disabled");
   jQuery(".sidora-form-next").last().addClass("form-button-disabled");
@@ -89,7 +94,73 @@ jQuery().ready(function(){
 	window.startBatch();
     });
   }else{
-    jQuery(".sidora-form-finish").click(function(e){ window.submitAll(); });
+        jQuery(".sidora-form-finish").click(function (e) {
+            //SFOX addition
+            var shouldHaveVals = jQuery(".form-required").closest("div").find("input[type=text]");
+            shouldHaveVals.css("border", "");
+
+            //Before attempting to submit, see that there are values in the proper places
+            var needVals = jQuery(".form-required").closest("div").find("input[type=text]").filter(function () {
+                return this.value == "";
+            });
+
+            //FBA, custom call back to go here as we only require the title field for now, the others
+            //will get 'caught' in the publication process
+            //For now, will just remove the non title entries from shouldHaveVals and needVals
+
+            //IS THIS THE PLACE WHERE FANCY FORM VALIDATION SHOULD HAPPEN?
+            var valsindex = shouldHaveVals.length;
+
+
+            while (valsindex--) {
+                if (shouldHaveVals[valsindex]['name'] != 'title') {
+                    shouldHaveVals.splice(valsindex, 1);
+                }
+            }
+
+            valsindex = needVals.length;
+
+            while (valsindex--) {
+                if (needVals[valsindex]['name'] != 'title') {
+                    needVals.splice(valsindex, 1);
+                }
+            }
+
+            //needVals is going to contain all the blank required inputs
+            if (needVals.length > 0) {
+                needVals.css("border", "solid 1px red");
+                //Show a pop up indicating which ones still need values?
+                var fullHtml = "<div style=\"background:whitesmoke;height:100%\"><div style=\"padding:10px;\"><div>The following items need values:</div>";
+                fullHtml += "<ul>";
+                for (var i = 0; i < needVals.length; i++) {
+                    fullHtml += "<li>";
+                    fullHtml += jQuery(needVals[i]).closest(".form-item").find("label")[0].childNodes[0].textContent;
+                    fullHtml += "</li>";
+                }
+                fullHtml += "</ul>";
+                fullHtml += "</div>"; //padding div
+                fullHtml += "</div>"; //100% div
+
+                var sbH = jQuery(window).height() - 600;
+                if (sbH < 100)
+                    sbH = 400;
+                var sbW = 600;
+                Shadowbox.open({
+                    content: fullHtml,
+                    player: "html",
+                    title: "Create Resource Form Submission",
+                    height: sbH,
+                    width: sbW, //jQuery(window).width()- 600,
+                    options: {
+                        onFinish: function () {
+                        }
+                    }
+                });
+                return;
+            }
+            //\SFox addition
+            window.submitAll();
+        });
   }
   jQuery(".sidora-form-cancel").click(function(e){
     if (window.parent.sidora && window.parent.sidora.CloseIFrame){

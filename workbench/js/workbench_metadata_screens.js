@@ -8,6 +8,24 @@ jQuery().ready(function(){
 
     //Before attempting to submit, see that there are values in the proper places
     var needVals = jQuery(".form-required").closest("div").find("input[type=text]").filter(function(){return this.value == "";});
+        //FBA, custom call back to go here as we only require the title field for now, the others
+        //will get 'caught' in the publication process
+        //For now, will just remove the non title entries from shouldHaveVals and needVals
+
+        //IS THIS THE PLACE WHERE FANCY FORM VALIDATION SHOULD HAPPEN?
+
+        var valsindex = shouldHaveVals.length;
+        while (valsindex--) {
+            if (shouldHaveVals[valsindex]['name'] != 'title') {
+                shouldHaveVals.splice(valsindex, 1);
+            }
+        }
+        valsindex = needVals.length;
+        while (valsindex--) {
+            if (needVals[valsindex]['name'] != 'title') {
+                needVals.splice(valsindex, 1);
+            }
+        }
     //needVals is going to contain all the blank required inputs
     if (needVals.length > 0){
       needVals.css("border","solid 1px red");

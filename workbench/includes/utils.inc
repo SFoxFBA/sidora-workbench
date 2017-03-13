@@ -1,4 +1,7 @@
 <?php
+
+module_load_include('inc', 'sidora', 'includes/fba_utils');
+
 /*
  * Copyright 2015 Smithsonian Institution.
  *
@@ -47,6 +50,7 @@
 function sidora_update_relationship($uri, $predicate, $recipient, $related, $remove = FALSE) {
   return sidora_update_relationship_choose_exit($uri, $predicate, $recipient, $related, $remove, TRUE);
 }
+
 function sidora_update_relationship_choose_exit($uri, $predicate, $recipient, $related, $remove = FALSE, $should_exit = FALSE) {
   $toReturn = array();
   // get the repository from the tuque wrapper
@@ -61,46 +65,46 @@ function sidora_update_relationship_choose_exit($uri, $predicate, $recipient, $r
     else {
       $parent->relationships->remove($uri, $predicate, $related);
     }
-  } catch(Exception $e) {
+  }
+  catch (Exception $e) {
     $code = $e->getCode();
-    if ($should_exit){
-     switch ($code) {
-      case '404':
-        if (!isset($description)) { // Couldn't reach the repository.
-          drupal_set_message(t('The Fedora repository server is currently unavailable. Please contact the site administrator %email',
-	    array('%email' => (variable_get('site_admin_email_to', '') != ''?' at ' . variable_get('site_admin_email_to'):''))), 'error', FALSE);
-        }
-        drupal_not_found();
-        break;
-      case '401':
-      case '403':
-        drupal_access_denied();
-        break;
-      default:
-        drupal_set_message(t('An error occured when attempting to access the fedora repository. Please contact the site administrator %email',
-	  array('%email' => (variable_get('site_admin_email_to', '') != ''?' at ' . variable_get('site_admin_email_to'):''))), 'error', FALSE);
-        $message = '%type: !message in %function (line %line of %file).';
-        $backtrace = $e->getTrace();
-        $caller = $backtrace[1];
-        $variables = array(
-          '%type' => get_class($e),
-          '!message' => check_plain($e->getMessage()),
-          '%function' => $caller['function'],
-          '%file' => $caller['file'],
-          '%line' => $caller['line']
-        );
-        watchdog('islandora', $message, $variables, WATCHDOG_ERROR, NULL);
-        drupal_not_found();
-        break;
-     }
-     exit();
-    }else{
-     $toReturn['success'] = false;
-     $toReturn['msg'] = $code;
-     return $toReturn;
+    if ($should_exit) {
+      switch ($code) {
+        case '404':
+          if (!isset($description)) { // Couldn't reach the repository.
+            drupal_set_message(t('The Fedora repository server is currently unavailable. Please contact the site administrator %email', array('%email' => (variable_get('site_admin_email_to', '') != '' ? ' at ' . variable_get('site_admin_email_to') : ''))), 'error', FALSE);
+          }
+          drupal_not_found();
+          break;
+        case '401':
+        case '403':
+          drupal_access_denied();
+          break;
+        default:
+          drupal_set_message(t('An error occured when attempting to access the fedora repository. Please contact the site administrator %email', array('%email' => (variable_get('site_admin_email_to', '') != '' ? ' at ' . variable_get('site_admin_email_to') : ''))), 'error', FALSE);
+          $message = '%type: !message in %function (line %line of %file).';
+          $backtrace = $e->getTrace();
+          $caller = $backtrace[1];
+          $variables = array(
+            '%type' => get_class($e),
+            '!message' => check_plain($e->getMessage()),
+            '%function' => $caller['function'],
+            '%file' => $caller['file'],
+            '%line' => $caller['line']
+          );
+          watchdog('islandora', $message, $variables, WATCHDOG_ERROR, NULL);
+          drupal_not_found();
+          break;
+      }
+      exit();
+    }
+    else {
+      $toReturn['success'] = false;
+      $toReturn['msg'] = $code;
+      return $toReturn;
     }
   }
-  $toReturn['success'] = true; 
+  $toReturn['success'] = true;
   return $toReturn;
 }
 
@@ -176,7 +180,8 @@ function sidora_get_user_root_object(stdClass $account = NULL) {
   global $user;
   $account = is_object($account) ? $account : $user;
   if (in_array('administrator', $account->roles)) {
-    return variable_get('islandora_repository_pid', 'si:root');
+    $prefix = sidora_get_system_prefix();
+    return variable_get('islandora_repository_pid', $prefix . ':root');
   }
   elseif (isset($account->data['islandora_user_pid'])) {
     return $account->data['islandora_user_pid'];
@@ -193,8 +198,6 @@ function sidora_get_user_object(stdClass $account = NULL) {
   return '';
 }
 
-
-
 /**
  * Gets the child resources belonging to the given object.
  *
@@ -204,7 +207,7 @@ function sidora_get_user_object(stdClass $account = NULL) {
  * @return array
  *   An associative array describing the child resources.
  */
-function sidora_get_child_resources(AbstractObject $object, array $params = array(), &$count = NULL) {
+function sidora_get_child_resources(AbstractObject $object, array $params = array(), &$count = NULL) { //SFOX is this used?
   $out = array();
   $default_params = array(
     'filter' => '',
@@ -239,7 +242,38 @@ function sidora_get_child_resources(AbstractObject $object, array $params = arra
       }
     }
   }
-  $query = "SELECT ?pid ?label ?model ?created FROM <#ri> WHERE {
+  if (system_is_fba()) {
+    $resourcecmodel = sidora_get_cmodel_from_pid($pid);
+    $fba_uri = FBA_URI;
+    $resourcerdf = $fba_uri . sidora_get_rel_from_pid($pid);
+
+    $query = "SELECT ?pid ?label ?model ?created FROM <info:edu.si.fedora#ri> WHERE {
+    <info:fedora/{$object->id}> <{$resourcerdf}> ?pid .
+    ?pid <fedora-model:state> <fedora-model:Active>;
+         <fedora-model:label> ?label;
+         <fedora-model:hasModel> ?model;
+         <fedora-model:createdDate> ?created.
+    {$filter}
+    FILTER(!sameTerm(?model, <info:fedora/fedora-system:FedoraObject-3.0>) &&
+           !sameTerm(?model, <info:fedora/{$resourcecmodel}>))
+    }
+    {$order}
+    OFFSET {$params['start']}
+    {$limit}";
+    $results = $object->repository->ri->query($query, 'sparql');
+    if ($count === NULL) {
+      $count = $object->repository->ri->countQuery($query, 'sparql');
+    }
+    foreach ($results as $result) {
+      $pid = $result['pid']['value'];
+      $out[$pid]['pid'] = $pid;
+      $out[$pid]['label'] = $result['label']['value'];
+      $out[$pid]['created'] = $result['created']['value'];
+      $out[$pid]['models'][] = $result['model']['value'];
+    }
+  }
+  else {
+    $query = "SELECT ?pid ?label ?model ?created FROM <info:edu.si.fedora#ri> WHERE {
     <info:fedora/{$object->id}> <fedora-rels-ext:hasResource> ?pid .
     ?pid <fedora-model:state> <fedora-model:Active>;
          <fedora-model:label> ?label;
@@ -252,16 +286,17 @@ function sidora_get_child_resources(AbstractObject $object, array $params = arra
     {$order}
     OFFSET {$params['start']}
     {$limit}";
-  $results = $object->repository->ri->query($query, 'sparql');
-  if ($count === NULL) {
-    $count = $object->repository->ri->countQuery($query, 'sparql');
-  }
-  foreach ($results as $result) {
-    $pid = $result['pid']['value'];
-    $out[$pid]['pid'] = $pid;
-    $out[$pid]['label'] = $result['label']['value'];
-    $out[$pid]['created'] = $result['created']['value'];
-    $out[$pid]['models'][] = $result['model']['value'];
+    $results = $object->repository->ri->query($query, 'sparql');
+    if ($count === NULL) {
+      $count = $object->repository->ri->countQuery($query, 'sparql');
+    }
+    foreach ($results as $result) {
+      $pid = $result['pid']['value'];
+      $out[$pid]['pid'] = $pid;
+      $out[$pid]['label'] = $result['label']['value'];
+      $out[$pid]['created'] = $result['created']['value'];
+      $out[$pid]['models'][] = $result['model']['value'];
+    }
   }
   return $out;
 }
@@ -275,16 +310,16 @@ function sidora_get_child_resources(AbstractObject $object, array $params = arra
  * @return array
  *   An associative array describing the child concepts.
  */
-function sidora_get_child_concepts(AbstractObject $object) {
+function sidora_get_child_concepts(AbstractObject $object) { //SFOX Is this used?
   $out = array();
-  $child_concepts = 'count(select $child from <#ri> where
+  $child_concepts = 'count(select $child from <info:edu.si.fedora#ri> where
     $concept <fedora-rels-ext:hasConcept> $child and
     $child <fedora-model:state> <fedora-model:Active>)';
-  $child_resources = 'count(select $child from <#ri> where
+  $child_resources = 'count(select $child from <info:edu.si.fedora#ri> where
     $concept <fedora-rels-ext:hasResource> $child and
     $child <fedora-model:state> <fedora-model:Active>)';
   $count = $child_concepts . ' ' . $child_resources;
-  $query = 'select $concept $label $model $created ' . $count . ' from <#ri> where
+  $query = 'select $concept $label $model $created ' . $count . ' from <info:edu.si.fedora#ri> where
     <info:fedora/' . $object->id . '> <fedora-rels-ext:hasConcept> $concept and
     $concept <fedora-model:state> <fedora-model:Active> and
     $concept <fedora-model:label> $label and
@@ -320,14 +355,14 @@ function sidora_get_number_of_children(AbstractObject $object) {
     'num_resources' => 0,
     'num_children' => 0,
   );
-  $child_concepts = 'count(select $child from <#ri> where
+  $child_concepts = 'count(select $child from <info:edu.si.fedora#ri> where
     $concept <fedora-rels-ext:hasConcept> $child and
     $child <fedora-model:state> <fedora-model:Active>)';
-  $child_resources = 'count(select $child from <#ri> where
+  $child_resources = 'count(select $child from <info:edu.si.fedora#ri> where
     $concept <fedora-rels-ext:hasResource> $child and
     $child <fedora-model:state> <fedora-model:Active>)';
   $count = $child_concepts . ' ' . $child_resources;
-  $query = 'select $concept ' . $count . ' from <#ri> where
+  $query = 'select $concept ' . $count . ' from <info:edu.si.fedora#ri> where
     $concept <mulgara:is> <info:fedora/' . $object->id . '>';
   $results = $object->repository->ri->query($query, 'itql');
   if (count($results)) {
@@ -353,7 +388,7 @@ function sidora_get_number_of_children(AbstractObject $object) {
 function sidora_get_where_codebook_used(AbstractObject $object) {
   $out = array();
   $tuque = islandora_get_tuque_connection();
-  $query = "SELECT ?pid ?label ?model FROM <#ri> 
+  $query = "SELECT ?pid ?label ?model FROM <info:edu.si.fedora#ri> 
 	    WHERE {
              { ?pid <info:fedora/fedora-system:def/relations-external#hasCodebook> <info:fedora/" . $object->id . "> .
                ?pid <info:fedora/fedora-system:def/model#state> <info:fedora/fedora-system:def/model#Active> .
@@ -373,6 +408,7 @@ function sidora_get_where_codebook_used(AbstractObject $object) {
   }
   return $out;
 }
+
 /**
  * Gets the parent concepts the given object belongs to.
  *
@@ -384,7 +420,96 @@ function sidora_get_where_codebook_used(AbstractObject $object) {
  */
 function sidora_get_parent_concepts(AbstractObject $object) {
   $out = array();
-  $query = "SELECT ?pid ?label ?model FROM <#ri> 
+  if (system_is_fba()) {
+    $query = "SELECT ?pid ?label ?model FROM <info:edu.si.fedora#ri> 
+WHERE {
+  {
+  ?pid <http://fba.org.uk/schemas/fba/fba_rdf/1.0.0/hasActivity> <info:fedora/" . $object->id . "> .
+  ?pid <info:fedora/fedora-system:def/model#state> <info:fedora/fedora-system:def/model#Active> .
+  ?pid <info:fedora/fedora-system:def/model#label> ?label .
+  ?pid <info:fedora/fedora-system:def/model#hasModel> ?model .
+  FILTER(!sameTerm(?model, <info:fedora/fedora-system:FedoraObject-3.0>) &&
+  !sameTerm(?model, <info:fedora/fba:activity_cmodel>))
+} UNION {
+?pid <http://fba.org.uk/schemas/fba/fba_rdf/1.0.0/hasDataset> <info:fedora/" . $object->id . "> .
+?pid <info:fedora/fedora-system:def/model#state> <info:fedora/fedora-system:def/model#Active> .
+?pid <info:fedora/fedora-system:def/model#label> ?label .
+?pid <info:fedora/fedora-system:def/model#hasModel> ?model .
+FILTER(!sameTerm(?model, <info:fedora/fedora-system:FedoraObject-3.0>) &&
+!sameTerm(?model, <info:fedora/fba:dataset_cmodel>))
+} UNION {
+?pid <http://fba.org.uk/schemas/fba/fba_rdf/1.0.0/hasMeasurement> <info:fedora/" . $object->id . "> .
+?pid <info:fedora/fedora-system:def/model#state> <info:fedora/fedora-system:def/model#Active> .
+?pid <info:fedora/fedora-system:def/model#label> ?label .
+?pid <info:fedora/fedora-system:def/model#hasModel> ?model .
+FILTER(!sameTerm(?model, <info:fedora/fedora-system:FedoraObject-3.0>) &&
+!sameTerm(?model, <info:fedora/fba:measurement_cmodel>))
+}
+UNION {
+?pid <http://fba.org.uk/schemas/fba/fba_rdf/1.0.0/hasAnalysis> <info:fedora/" . $object->id . "> .
+?pid <info:fedora/fedora-system:def/model#state> <info:fedora/fedora-system:def/model#Active> .
+?pid <info:fedora/fedora-system:def/model#label> ?label .
+?pid <info:fedora/fedora-system:def/model#hasModel> ?model .
+FILTER(!sameTerm(?model, <info:fedora/fedora-system:FedoraObject-3.0>) &&
+!sameTerm(?model, <info:fedora/fba:analysis_cmodel>))
+}
+UNION {
+?pid <http://fba.org.uk/schemas/fba/fba_rdf/1.0.0/hasLiteratureReview> <info:fedora/" . $object->id . "> .
+?pid <info:fedora/fedora-system:def/model#state> <info:fedora/fedora-system:def/model#Active> .
+?pid <info:fedora/fedora-system:def/model#label> ?label .
+?pid <info:fedora/fedora-system:def/model#hasModel> ?model .
+FILTER(!sameTerm(?model, <info:fedora/fedora-system:FedoraObject-3.0>) &&
+!sameTerm(?model, <info:fedora/fba:litreview_cmodel>))
+}
+UNION {
+?pid <http://fba.org.uk/schemas/fba/fba_rdf/1.0.0/hasSimulation> <info:fedora/" . $object->id . "> .
+?pid <info:fedora/fedora-system:def/model#state> <info:fedora/fedora-system:def/model#Active> .
+?pid <info:fedora/fedora-system:def/model#label> ?label .
+?pid <info:fedora/fedora-system:def/model#hasModel> ?model .
+FILTER(!sameTerm(?model, <info:fedora/fedora-system:FedoraObject-3.0>) &&
+!sameTerm(?model, <info:fedora/fba:simulation_cmodel>))
+}
+UNION {
+?pid <http://fba.org.uk/schemas/fba/fba_rdf/1.0.0/hasSynthesis> <info:fedora/" . $object->id . "> .
+?pid <info:fedora/fedora-system:def/model#state> <info:fedora/fedora-system:def/model#Active> .
+?pid <info:fedora/fedora-system:def/model#label> ?label .
+?pid <info:fedora/fedora-system:def/model#hasModel> ?model .
+FILTER(!sameTerm(?model, <info:fedora/fedora-system:FedoraObject-3.0>) &&
+!sameTerm(?model, <info:fedora/fba:synthesis_cmodel>))
+}
+UNION {
+?pid <http://fba.org.uk/schemas/fba/fba_rdf/1.0.0/hasSupplementaryFile> <info:fedora/" . $object->id . "> .
+?pid <info:fedora/fedora-system:def/model#state> <info:fedora/fedora-system:def/model#Active> .
+?pid <info:fedora/fedora-system:def/model#label> ?label .
+?pid <info:fedora/fedora-system:def/model#hasModel> ?model .
+FILTER(!sameTerm(?model, <info:fedora/fedora-system:FedoraObject-3.0>) &&
+!sameTerm(?model, <info:fedora/fba:supp_word_cmodel>) &&
+!sameTerm(?model, <info:fedora/fba:supp_basic_image_cmodel>) &&
+!sameTerm(?model, <info:fedora/fba:supp_excel_cmodel>) &&
+!sameTerm(?model, <info:fedora/fba:supp_text_cmodel>) &&
+!sameTerm(?model, <info:fedora/fba:supp_pdf_cmodel>) &&
+!sameTerm(?model, <info:fedora/fba:supp_large_image_cmodel>))
+}
+UNION {
+?pid <info:fedora/fedora-system:def/relations-external#managesCodebook> <info:fedora/" . $object->id . "> .
+?pid <info:fedora/fedora-system:def/model#state> <info:fedora/fedora-system:def/model#Active> .
+?pid <info:fedora/fedora-system:def/model#label> ?label .
+?pid <info:fedora/fedora-system:def/model#hasModel> ?model .
+FILTER(!sameTerm(?model, <info:fedora/fedora-system:FedoraObject-3.0>) &&
+!sameTerm(?model, <info:fedora/si:resourceCModel>) &&
+!sameTerm(?model, <info:fedora/si:conceptCModel>))
+}
+} ORDER BY ?label";
+    $results = $object->repository->ri->query($query, 'sparql');
+    foreach ($results as $result) {
+      $pid = $result['pid']['value'];
+      $out[$pid]['pid'] = $pid;
+      $out[$pid]['label'] = $result['label']['value'];
+      $out[$pid]['models'][] = $result['model']['value'];
+    }
+  }
+  else {
+    $query = "SELECT ?pid ?label ?model FROM <info:edu.si.fedora#ri> 
 	WHERE {
          {
          ?pid <info:fedora/fedora-system:def/relations-external#hasConcept> <info:fedora/" . $object->id . "> .
@@ -410,12 +535,13 @@ function sidora_get_parent_concepts(AbstractObject $object) {
                  !sameTerm(?model, <info:fedora/si:conceptCModel>))
         }
       } ORDER BY ?label";
-  $results = $object->repository->ri->query($query, 'sparql');
-  foreach ($results as $result) {
-    $pid = $result['pid']['value'];
-    $out[$pid]['pid'] = $pid;
-    $out[$pid]['label'] = $result['label']['value'];
-    $out[$pid]['models'][] = $result['model']['value'];
+    $results = $object->repository->ri->query($query, 'sparql');
+    foreach ($results as $result) {
+      $pid = $result['pid']['value'];
+      $out[$pid]['pid'] = $pid;
+      $out[$pid]['label'] = $result['label']['value'];
+      $out[$pid]['models'][] = $result['model']['value'];
+    }
   }
   return $out;
 }
@@ -433,17 +559,28 @@ function sidora_get_parent_concepts(AbstractObject $object) {
  *   - 'si:resourceCModel'
  *   - 'si:conceptCModel'
  *   - 'fedora-system:FedoraObject-3.0'
+ *   - FBA concepts content models
+ *   - FBA resources content models
  *
  * @return string
  *   The PID of the concept model, or NULL if none was found.
  */
 function sidora_get_model(AbstractObject $object, array $ignore_models = NULL) {
-  // Reduce to the last model that isn't and ignored si:resourceCModel.
-  $ignore_models = isset($ignore_models) ? $ignore_models : array(
-    'si:resourceCModel',
-    'si:conceptCModel',
-    'fedora-system:FedoraObject-3.0',
-  );
+  if (system_is_fba()) {
+    $conceptcmodels = sidora_return_fba_concept_cmodels();
+    $resourcecmodels = sidora_return_fba_resource_cmodels();
+    $ignore_array = array_merge($conceptcmodels, $resourcecmodels);
+    $ignore_array[] = 'fedora-system:FedoraObject-3.0';
+    $ignore_models = isset($ignore_models) ? $ignore_models : $ignore_array;
+  }
+  else {
+    // Reduce to the last model that isn't and ignored si:resourceCModel.
+    $ignore_models = isset($ignore_models) ? $ignore_models : array(
+      'si:resourceCModel',
+      'si:conceptCModel',
+      'fedora-system:FedoraObject-3.0',
+    );
+  }
   $ignore_base_content_models = function(&$result, $model) use($ignore_models) {
     $ignore_model = in_array($model, $ignore_models);
     $result = $ignore_model ? $result : $model;
@@ -463,17 +600,50 @@ function sidora_get_model(AbstractObject $object, array $ignore_models = NULL) {
  *   TRUE if the given object is a resource, FALSE otherwise.
  */
 function sidora_is_resource(AbstractObject $object) {
-  $names = sidora_get_content_model_names();
-  $all_models = array();
-  foreach($names as $model => $name){ $all_models[] = $model; }
-  if (sidora_is_concept($object)) return FALSE;
-  if (sidora_is_codebook($object)) return FALSE;
-  if (empty($GLOBALS['sidora_object_models_'.$object])){
-    $GLOBALS['sidora_object_models_'.$object] = $object->models;
+  if (system_is_fba()) {
+    //SFOX changed this so that is gets the values from the JSON for resources
+    $resource_json = variable_get('sidora_resource_ontology_json', sidora_resource_ontology_json_default());
+    $resources = json_decode($resource_json);
+    foreach ($resources as $resource) {
+      $all_models[] = $resource->model;
+    }
+    if (sidora_is_concept($object))
+      return FALSE;
+    if (sidora_is_codebook($object))
+      return FALSE;
+    if (empty($GLOBALS['sidora_object_models_' . $object])) {
+      $GLOBALS['sidora_object_models_' . $object] = $object->models;
+    }
+    $curr_models = $GLOBALS['sidora_object_models_' . $object];
+    $resourcecmodels = sidora_return_fba_resource_cmodels();
+
+    $inarray = FALSE;
+    foreach ($resourcecmodels as $resourcecmodel) {
+      if (in_array($resourcecmodel, $curr_models)) {
+        $inarray = TRUE;
+        break;
+      }
+    }
+
+    return $inarray || array_intersect($all_models, $curr_models);
   }
-  $curr_models = $GLOBALS['sidora_object_models_'.$object];
-  return in_array('si:resourceCModel', $curr_models) ||
-    array_intersect($all_models, $curr_models);
+  else {
+    $names = sidora_get_content_model_names();
+    $all_models = array();
+    foreach ($names as $model => $name) {
+      $all_models[] = $model;
+    }
+    if (sidora_is_concept($object))
+      return FALSE;
+    if (sidora_is_codebook($object))
+      return FALSE;
+    if (empty($GLOBALS['sidora_object_models_' . $object])) {
+      $GLOBALS['sidora_object_models_' . $object] = $object->models;
+    }
+    $curr_models = $GLOBALS['sidora_object_models_' . $object];
+    return in_array('si:resourceCModel', $curr_models) ||
+        array_intersect($all_models, $curr_models);
+  }
 }
 
 /**
@@ -487,12 +657,12 @@ function sidora_is_resource(AbstractObject $object) {
  */
 function sidora_is_codebook(AbstractObject $object) {
   $codebook_models = array(
-      'si:codebookCModel',
+    'si:codebookCModel',
   );
-  if (empty($GLOBALS['sidora_object_models_'.$object])){
-    $GLOBALS['sidora_object_models_'.$object] = $object->models;
+  if (empty($GLOBALS['sidora_object_models_' . $object])) {
+    $GLOBALS['sidora_object_models_' . $object] = $object->models;
   }
-  $curr_models = $GLOBALS['sidora_object_models_'.$object];
+  $curr_models = $GLOBALS['sidora_object_models_' . $object];
   return array_intersect($codebook_models, $curr_models);
 }
 
@@ -506,7 +676,36 @@ function sidora_is_codebook(AbstractObject $object) {
  *   TRUE if the given object is a concept, FALSE otherwise.
  */
 function sidora_is_concept(AbstractObject $object) {
-  $concept_models = array(
+  if (system_is_fba()) {
+
+    //SFOX changed this so that is gets the values from the JSON for concepts
+    $concept_json = variable_get('sidora_ontology_json', sidora_ontology_json_default());
+    $concepts = json_decode($concept_json);
+    foreach ($concepts as $concept) {
+      $concept_models[] = $concept->model;
+    }
+    if (empty($GLOBALS['sidora_object_models_' . $object])) {
+      $GLOBALS['sidora_object_models_' . $object] = $object->models;
+    }
+    $curr_models = $GLOBALS['sidora_object_models_' . $object];
+    $conceptcmodels = sidora_return_fba_concept_cmodels();
+
+    $inarray = FALSE;
+    if (sidora_is_user($object->id)) {
+      $inarray = TRUE;
+    }
+    else {
+      foreach ($conceptcmodels as $conceptcmodel) {
+        if (in_array($conceptcmodel, $curr_models)) {
+          $inarray = TRUE;
+          break; //no further checks required
+        }
+      }
+    }
+    return $inarray || array_intersect($concept_models, $curr_models);
+  }
+  else {
+    $concept_models = array(
       'si:collectionCModel',
       'si:projectCModel',
       'si:ctPlotCModel',
@@ -517,14 +716,15 @@ function sidora_is_concept(AbstractObject $object) {
       'si:ncdCollectionCModel',
       'si:dwcCModel',
       'si:lidoCollectionCModel',
-  );
+    );
 
-  if (empty($GLOBALS['sidora_object_models_'.$object])){
-    $GLOBALS['sidora_object_models_'.$object] = $object->models;
+    if (empty($GLOBALS['sidora_object_models_' . $object])) {
+      $GLOBALS['sidora_object_models_' . $object] = $object->models;
+    }
+    $curr_models = $GLOBALS['sidora_object_models_' . $object];
+    return in_array('si:conceptCModel', $curr_models) ||
+        array_intersect($concept_models, $curr_models);
   }
-  $curr_models = $GLOBALS['sidora_object_models_'.$object];
-  return in_array('si:conceptCModel', $curr_models)  ||
-    array_intersect($concept_models, $curr_models);
 }
 
 /**
@@ -552,13 +752,15 @@ function sidora_update_datastream(AbstractObject $object, $file, $dsid, $label =
   $ds = isset($object[$dsid]) ? $object[$dsid] : $object->constructDatastream($dsid, $control_group);
   $is_file = file_exists($file);
   $ds->label = isset($label) ? $label : $dsid;
-  if (isset($mimetype)){
-	  $ds->mimetype = $mimetype;
-	}elseif ($is_file){
-	  $ds->mimetype = $mime_detector->getMimeType($file);
-	}else{
-	  $ds->mimetype = 'text/xml';
-	}			
+  if (isset($mimetype)) {
+    $ds->mimetype = $mimetype;
+  }
+  elseif ($is_file) {
+    $ds->mimetype = $mime_detector->getMimeType($file);
+  }
+  else {
+    $ds->mimetype = 'text/xml';
+  }
   if ($is_file) {
     $ds->setContentFromFile($file, $copy);
   }
@@ -567,7 +769,6 @@ function sidora_update_datastream(AbstractObject $object, $file, $dsid, $label =
   }
   if (empty($object[$dsid])) {
     $object->ingestDatastream($ds);
-
   }
   return TRUE;
 }
@@ -595,11 +796,18 @@ function sidora_add_children(AbstractObject $parent, array $children) {
  *   The child to add to the parent.
  */
 function sidora_add_child(AbstractObject $parent, AbstractObject $child) {
-  if (sidora_is_concept($child)) {
-    sidora_set_relationship($parent->relationships, FEDORA_RELS_EXT_URI, 'hasConcept', $child->id);
+  if (system_is_fba()) {
+    //SFOX altered to use function for rdf to replace hasConcept/hasResource
+    $forwardrdf = sidora_get_fba_rdf($parent->id, $child->id);
+    sidora_set_relationship($parent->relationships, FBA_URI, $forwardrdf, $child->id); //SFOX was 'hasConcept' 
   }
-  elseif (sidora_is_resource($child)) {
-    sidora_set_relationship($parent->relationships, FEDORA_RELS_EXT_URI, 'hasResource', $child->id);
+  else {
+    if (sidora_is_concept($child)) {
+      sidora_set_relationship($parent->relationships, FEDORA_RELS_EXT_URI, 'hasConcept', $child->id);
+    }
+    elseif (sidora_is_resource($child)) {
+      sidora_set_relationship($parent->relationships, FEDORA_RELS_EXT_URI, 'hasResource', $child->id);
+    }
   }
 }
 
@@ -627,7 +835,7 @@ function sidora_set_relationship(FedoraRelationships $relationships, $predicate_
 /**
  * Creates a user object for the given user account.
  *
- * All user objects are added as children to 'si:user-projects'.
+ * All user objects are added as children to '<system-prefix>:user-projects'.
  *
  * @param stdClass $account
  *   The Drupal user account object.
@@ -636,41 +844,45 @@ function sidora_set_relationship(FedoraRelationships $relationships, $predicate_
  *   The created user object if successful, FALSE otherwise.
  */
 function sidora_create_user_object(stdClass $account) {
-  $user_projects = islandora_object_load('si:user-projects');
+  $prefix = sidora_get_system_prefix();
+  $user_projects = islandora_object_load($prefix . ':user-projects');
   if (!is_object($user_projects)) {
     return FALSE;
   }
   module_load_include('inc', 'xml_form_builder', 'includes/associations');
-  $user_object = $user_projects->repository->constructObject('si-user');
+  $user_object = $user_projects->repository->constructObject($prefix . '-user');
+  appendFbaNamespace($user_object);
   $user_object->owner = $account->name;
   $user_object->label = "{$account->name} Projects";
   $user_object->models = array('si:conceptCModel', variable_get('sidora_automatic_person_model', 'si:HierarchyObject'));
   /*
-  $eaccpf = sidora_create_default_person_eaccpf($user_object, $account);
-  sidora_update_datastream($user_object, $eaccpf, 'EAC-CPF');
-  */
+    $eaccpf = sidora_create_default_person_eaccpf($user_object, $account);
+    sidora_update_datastream($user_object, $eaccpf, 'EAC-CPF');
+   */
   $descmeta = sidora_create_default_person_descmeta($user_object, $account);
   sidora_update_datastream($user_object, $descmeta, 'DESCMETA');
   sidora_update_datastream($user_object, sidora_create_default_xacml($account), 'POLICY');
   $associations = xml_form_builder_get_associations(array(), $user_object->models, array());
-  if (count($associations) == 1){
+  if (count($associations) == 1) {
     sidora_update_datastream($user_object, '<sidora>
-<model>'.$associations[0]['content_model'].'</model>
-<form>'.$associations[0]['form_name'].'</form>
+<model>' . $associations[0]['content_model'] . '</model>
+<form>' . $associations[0]['form_name'] . '</form>
 <ontology_location_id>AUTOMATIC_USER_CREATION_FROM_ASSOCIATION</ontology_location_id>
 <meta_requirements_fulfilled>FALSE</meta_requirements_fulfilled>
-<initial_dsid>'.$associations[0]['dsid'].'</initial_dsid>
+<initial_dsid>' . $associations[0]['dsid'] . '</initial_dsid>
 </sidora>', 'SIDORA');
-  }else{
+  }
+  else {
     $dsid = variable_get('sidora_automatic_person_dsid', 'DESCMETA');
     sidora_update_datastream($user_object, '<sidora>
-<model>'.variable_get('sidora_automatic_person_model', 'si:HierarchyObject').'</model>
-<form>'. variable_get('sidora_automatic_person_form', 'Person 2015').'</form>
+<model>' . variable_get('sidora_automatic_person_model', 'si:HierarchyObject') . '</model>
+<form>' . variable_get('sidora_automatic_person_form', 'Person 2015') . '</form>
 <ontology_location_id>AUTOMATIC_USER_CREATION_FROM_SIDORA_DEFAULT</ontology_location_id>
 <meta_requirements_fulfilled>FALSE</meta_requirements_fulfilled>
-<initial_dsid>'.$dsid.'</initial_dsid>
+<initial_dsid>' . $dsid . '</initial_dsid>
 </sidora>', 'SIDORA');
-    if (empty($user_object[$dsid])) sidora_update_datastream($user_object, '<xml></xml>', $dsid);
+    if (empty($user_object[$dsid]))
+      sidora_update_datastream($user_object, '<xml></xml>', $dsid);
   }
 
   sidora_add_child($user_projects, $user_object);
@@ -694,8 +906,7 @@ function sidora_create_user_object(stdClass $account) {
 function sidora_create_default_xacml(stdClass $account = NULL) {
   global $user;
   $account = is_object($account) ? $account : $user;
-  $xml = 
-"<Policy xmlns=\"urn:oasis:names:tc:xacml:1.0:policy\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" PolicyId=\"islandora-xacml-editor-v1\" RuleCombiningAlgId=\"urn:oasis:names:tc:xacml:1.0:rule-combining-algorithm:first-applicable\">
+  $xml = "<Policy xmlns=\"urn:oasis:names:tc:xacml:1.0:policy\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" PolicyId=\"islandora-xacml-editor-v1\" RuleCombiningAlgId=\"urn:oasis:names:tc:xacml:1.0:rule-combining-algorithm:first-applicable\">
   <Target>
     <Subjects>
       <AnySubject></AnySubject>
@@ -937,14 +1148,14 @@ function sidora_create_default_xacml(stdClass $account = NULL) {
 </Policy>
 ";
   /*
-  module_load_include('inc', 'islandora_xacml_api', 'Xacml');
-  $xacml = new Xacml();
-  $xacml->managementRule->addUser(array('fedoraAdmin', $account->name));
-  $xacml->managementRule->addRole(array('administrator'));
-  $xacml->viewingRule->addUser(array('fedoraAdmin', $account->name));
-  $xacml->viewingRule->addRole(array('administrator'));
-  $xml = $xacml->getXmlString(TRUE);
-  */
+    module_load_include('inc', 'islandora_xacml_api', 'Xacml');
+    $xacml = new Xacml();
+    $xacml->managementRule->addUser(array('fedoraAdmin', $account->name));
+    $xacml->managementRule->addRole(array('administrator'));
+    $xacml->viewingRule->addUser(array('fedoraAdmin', $account->name));
+    $xacml->viewingRule->addRole(array('administrator'));
+    $xml = $xacml->getXmlString(TRUE);
+   */
   return $xml;
 }
 
@@ -1116,232 +1327,240 @@ function sidora_create_default_person_eaccpf(AbstractObject $object, $account) {
 </eac-cpf>
 EOT;
 }
-function sidora_get_file_extension_from_mime($file_mime_type, $get_mime = FALSE){
-      $file_extensions_for_mime_types_map = array(
-        'image/x-jg' => '.art',
-        'text/asp' => '.asp',
-        'application/x-mplayer2' => '.asx',
-        'video/x-ms-asf-plugin' => '.asx',
-        'audio/x-au' => '.au',
-        'video/avi' => '.avi',
-        'video/x-msvideo' => '.avi',
-        'video/avs-video' => '.avs',
-        'image/x-windows-bmp' => '.bmp',
-				'image/bmp' => '.bmp',
-				'application/xml-dtd' => '.dtd',
-				'text/html' => '.html',
-        'application/x-bzip' => '.bz',
-        'application/java' => '.class',
-        'application/java-byte-code' => '.class',
-        'application/x-java-class' => '.class',
-        'text/css' => '.css',
-        'video/fli' => '.fli',
-        'video/x-fli' => '.fli',
-        'image/g3fax' => '.g3',
-        'image/gif' => '.gif',
-        'video/gl' => '.gl',
-        'video/x-gl' => '.gl',
-        'text/x-component' => '.htc',
-        'text/webviewhtml' => '.htt',
-        'image/x-icon' => '.ico',
-        'image/x-jps' => '.jps',
-        'application/x-javascript' => '.js ',
-        'audio/x-liveaudio' => '.lam',
-        'www/mime' => '.mime ',
-        'video/x-motion-jpeg' => '.mjpg ',
-				'image/jpeg' => '.jpg',
-				'image/jp2' => '.jp2',
-        'audio/mod' => '.mod',
-        'audio/x-mod' => '.mod',
-        'audio/x-mpeg' => '.mp2',
-        'video/x-mpeq2a' => '.mp2',
-        'audio/mpeg3' => '.mp3',
-        'audio/x-mpeg-3' => '.mp3',
-				'audio/x-midi' => '.midi',
-				'audio/mpeg' => '.mp3',
-				'application/vnd.openxmlformats-officedocument.presentationml.template' => '.potx',
-				'application/msword' => '.doc',
-				'application/vnd.openxmlformats-officedocument.wordprocessingml.document' => '.docx',
-				'video/mpeg' => '.mpeg',
-				'application/vnd.openxmlformats-officedocument.presentationml.slideshow' => '.ppsx',
-        'image/x-portable-bitmap' => '.pbm ',
-        'application/vnd.hp-pcl' => '.pcl',
-        'image/x-pict' => '.pct',
-        'image/x-pcx' => '.pcx',
-        'application/pdf' => '.pdf',
-				'application/acrobat' => '.pdf',
-				'application/x-pdf' => '.pdf',
-				'applications/vnd.pdf' => '.pdf',
-				'text/pdf' => '.pdf',
-				'text/x-pdf' => '.pdf',
-				'application/csv' => '.csv',
-				'text/csv' => '.csv',
-				'text/comma-separated-values' => '.csv',
-				'application/vnd.ms-excel' => '.xls',
-				'application/vnd.ms-excel.sheet.binary.macroEnabled.12' => '.xlsb',
-				'image/png' => '.png',
-        'audio/make.my.funk' => '.pfunk',
-        'image/x-portable-graymap' => '.pgm',
-        'image/x-portable-greymap' => '.pgm',
-        'image/x-portable-pixmap' => '.ppm',
-        'application/powerpoint' => '.ppt',
-        'application/x-mspowerpoint' => '.ppt',
-				'application/mspowerpnt' => '.ppt',
-				'application/ms-powerpoint' => '.ppt',
-				'application/mspowerpoint' => '.ppt',
-				'application/vnd-mspowerpoint' => '.ppt',
-				'application/vnd.ms-powerpoint' => '.ppt',
-				'application/vnd.openxmlformats-officedocument.presentationml.presentation' => '.pptx',
-        'application/x-freelance' => '.pre',
-        'audio/vnd.qcelp' => '.qcp ',
-        'video/x-qtc' => '.qtc',
-        'audio/x-realaudio' => '.ra',
-				'video/quicktime' => '.qt',
-				'audio/x-pn-realaudio' => '.ra',
-				'audio/vnd.rn-realaudio' => '.ra',
-				'audio/x-pn-realaudio' => '.ram',
-				'audio/vnd.rn-realaudio' => '.ram',
-				'application/vnd.openxmlformats-officedocument.presentationml.slide' => '.sldx',
-				'image/svg+xml' => '.svg',
-				'application/vnd.ms-excel.addin.macroEnabled.12' => '.xlam',
-        'audio/mid' => '.rmi',
-        'application/x-rtf' => '.rtf',
-				'application/rdf' => '.rdf',
-				'application/rdf+xml' => '.rdf',
-				'application/rtf' => '.rtf',
-				'text/plain' => '.txt',
-				'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' => '.xlsx',
-				'application/vnd.openxmlformats-officedocument.spreadsheetml.template' => '.xltx',
-        'video/vnd.rn-realvideo' => '.rv',
-        'audio/s3m' => '.s3m ',
-        'application/x-shockwave-flash' => '.swf',
-        'application/x-tar' => '.tar',
-        'application/plain' => '.text',
-        'application/gnutar' => '.tgz',
-        'text/tab-separated-values' => '.tsv',
-				'image/tiff' => '.tiff',
-        'audio/voxware' => '.vox',
-        'application/wordperfect6.1' => '.w61',
-        'audio/wav' => '.wav',
-        'audio/x-wav' => '.wav',
-        'application/x-qpro' => '.wb1',
-        'image/vnd.wap.wbmp' => '.wbmp',
-        'application/vnd.xara' => '.web',
-        'windows/metafile' => '.wmf',
-        'image/x-xbitmap' => '.xbm',
-        'image/vnd.xiff' => '.xif',
-        'audio/xm' => '.xm',
-        'application/xml' => '.xml',
-        'text/xml' => '.xml',
-        'application/x-zip-compressed' => '.zip',
-        'application/zip' => '.zip',
-        'multipart/x-zip' => '.zip',
-				'audio/aiff' => '.aiff',
-				'audio/x-aiff' => '.aiff',
-				'video/quicktime' => '.mov',
-				'video/mp4' => '.mp4',
-				'audio/ogg' => 'ogg',
-				'video/x-m4v' => '.m4v',
-				'video/mp4' => '.m4v',
-				'audio/mp4' => '.m4a',
-				'video/x-matroska' => '.mkv',
-				'audio/aac' => '.aac',
-				'audio/x-ms-wma' => '.wma',
-				);
-      if (!$get_mime) {
-        if (isset($file_extensions_for_mime_types_map[$file_mime_type]))
-        {
-          return $file_extensions_for_mime_types_map[$file_mime_type];
-        }
-        $pieces = explode('/', $file_mime_type);
-        return '.' . array_pop($pieces);
-			}else{
-			  $mime_type_for_extension_map = array_flip($file_extensions_for_mime_types_map);
-				$file_extension = '.' . $file_mime_type;
-				if (isset($mime_type_for_extension_map[$file_extension]))
-				{
-				  return $mime_type_for_extension_map[$file_extension];
-				}
-				return FALSE;
-			}		
+
+function sidora_get_file_extension_from_mime($file_mime_type, $get_mime = FALSE) {
+  $file_extensions_for_mime_types_map = array(
+    'image/x-jg' => '.art',
+    'text/asp' => '.asp',
+    'application/x-mplayer2' => '.asx',
+    'video/x-ms-asf-plugin' => '.asx',
+    'audio/x-au' => '.au',
+    'video/avi' => '.avi',
+    'video/x-msvideo' => '.avi',
+    'video/avs-video' => '.avs',
+    'image/x-windows-bmp' => '.bmp',
+    'image/bmp' => '.bmp',
+    'application/xml-dtd' => '.dtd',
+    'text/html' => '.html',
+    'application/x-bzip' => '.bz',
+    'application/java' => '.class',
+    'application/java-byte-code' => '.class',
+    'application/x-java-class' => '.class',
+    'text/css' => '.css',
+    'video/fli' => '.fli',
+    'video/x-fli' => '.fli',
+    'image/g3fax' => '.g3',
+    'image/gif' => '.gif',
+    'video/gl' => '.gl',
+    'video/x-gl' => '.gl',
+    'text/x-component' => '.htc',
+    'text/webviewhtml' => '.htt',
+    'image/x-icon' => '.ico',
+    'image/x-jps' => '.jps',
+    'application/x-javascript' => '.js ',
+    'audio/x-liveaudio' => '.lam',
+    'www/mime' => '.mime ',
+    'video/x-motion-jpeg' => '.mjpg ',
+    'image/jpeg' => '.jpg',
+    'image/jp2' => '.jp2',
+    'audio/mod' => '.mod',
+    'audio/x-mod' => '.mod',
+    'audio/x-mpeg' => '.mp2',
+    'video/x-mpeq2a' => '.mp2',
+    'audio/mpeg3' => '.mp3',
+    'audio/x-mpeg-3' => '.mp3',
+    'audio/x-midi' => '.midi',
+    'audio/mpeg' => '.mp3',
+    'application/vnd.openxmlformats-officedocument.presentationml.template' => '.potx',
+    'application/msword' => '.doc',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document' => '.docx',
+    'video/mpeg' => '.mpeg',
+    'application/vnd.openxmlformats-officedocument.presentationml.slideshow' => '.ppsx',
+    'image/x-portable-bitmap' => '.pbm ',
+    'application/vnd.hp-pcl' => '.pcl',
+    'image/x-pict' => '.pct',
+    'image/x-pcx' => '.pcx',
+    'application/pdf' => '.pdf',
+    'application/acrobat' => '.pdf',
+    'application/x-pdf' => '.pdf',
+    'applications/vnd.pdf' => '.pdf',
+    'text/pdf' => '.pdf',
+    'text/x-pdf' => '.pdf',
+    'application/csv' => '.csv',
+    'text/csv' => '.csv',
+    'text/comma-separated-values' => '.csv',
+    'application/vnd.ms-excel' => '.xls',
+    'application/vnd.ms-excel.sheet.binary.macroEnabled.12' => '.xlsb',
+    'image/png' => '.png',
+    'audio/make.my.funk' => '.pfunk',
+    'image/x-portable-graymap' => '.pgm',
+    'image/x-portable-greymap' => '.pgm',
+    'image/x-portable-pixmap' => '.ppm',
+    'application/powerpoint' => '.ppt',
+    'application/x-mspowerpoint' => '.ppt',
+    'application/mspowerpnt' => '.ppt',
+    'application/ms-powerpoint' => '.ppt',
+    'application/mspowerpoint' => '.ppt',
+    'application/vnd-mspowerpoint' => '.ppt',
+    'application/vnd.ms-powerpoint' => '.ppt',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation' => '.pptx',
+    'application/x-freelance' => '.pre',
+    'audio/vnd.qcelp' => '.qcp ',
+    'video/x-qtc' => '.qtc',
+    'audio/x-realaudio' => '.ra',
+    'video/quicktime' => '.qt',
+    'audio/x-pn-realaudio' => '.ra',
+    'audio/vnd.rn-realaudio' => '.ra',
+    'audio/x-pn-realaudio' => '.ram',
+    'audio/vnd.rn-realaudio' => '.ram',
+    'application/vnd.openxmlformats-officedocument.presentationml.slide' => '.sldx',
+    'image/svg+xml' => '.svg',
+    'application/vnd.ms-excel.addin.macroEnabled.12' => '.xlam',
+    'audio/mid' => '.rmi',
+    'application/x-rtf' => '.rtf',
+    'application/rdf' => '.rdf',
+    'application/rdf+xml' => '.rdf',
+    'application/rtf' => '.rtf',
+    'text/plain' => '.txt',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' => '.xlsx',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.template' => '.xltx',
+    'video/vnd.rn-realvideo' => '.rv',
+    'audio/s3m' => '.s3m ',
+    'application/x-shockwave-flash' => '.swf',
+    'application/x-tar' => '.tar',
+    'application/plain' => '.text',
+    'application/gnutar' => '.tgz',
+    'text/tab-separated-values' => '.tsv',
+    'image/tiff' => '.tiff',
+    'audio/voxware' => '.vox',
+    'application/wordperfect6.1' => '.w61',
+    'audio/wav' => '.wav',
+    'audio/x-wav' => '.wav',
+    'application/x-qpro' => '.wb1',
+    'image/vnd.wap.wbmp' => '.wbmp',
+    'application/vnd.xara' => '.web',
+    'windows/metafile' => '.wmf',
+    'image/x-xbitmap' => '.xbm',
+    'image/vnd.xiff' => '.xif',
+    'audio/xm' => '.xm',
+    'application/xml' => '.xml',
+    'text/xml' => '.xml',
+    'application/x-zip-compressed' => '.zip',
+    'application/zip' => '.zip',
+    'multipart/x-zip' => '.zip',
+    'audio/aiff' => '.aiff',
+    'audio/x-aiff' => '.aiff',
+    'video/quicktime' => '.mov',
+    'video/mp4' => '.mp4',
+    'audio/ogg' => 'ogg',
+    'video/x-m4v' => '.m4v',
+    'video/mp4' => '.m4v',
+    'audio/mp4' => '.m4a',
+    'video/x-matroska' => '.mkv',
+    'audio/aac' => '.aac',
+    'audio/x-ms-wma' => '.wma',
+  );
+  if (!$get_mime) {
+    if (isset($file_extensions_for_mime_types_map[$file_mime_type])) {
+      return $file_extensions_for_mime_types_map[$file_mime_type];
+    }
+    $pieces = explode('/', $file_mime_type);
+    return '.' . array_pop($pieces);
+  }
+  else {
+    $mime_type_for_extension_map = array_flip($file_extensions_for_mime_types_map);
+    $file_extension = '.' . $file_mime_type;
+    if (isset($mime_type_for_extension_map[$file_extension])) {
+      return $mime_type_for_extension_map[$file_extension];
+    }
+    return FALSE;
+  }
 }
+
 /* This function takes the ontology id from the sidora datastream of a pid and 
  * retrieves the corresponding concept type from the sidora_ontology_json string
  */
-function sidora_get_concept_type($ontology_id){
-  $sidora_ontology_json = variable_get('sidora_ontology_json',sidora_ontology_json_default());
-	$sidora_ontology_array = json_decode($sidora_ontology_json,true);
-	return sidora_search_ontology_for_concept_type($sidora_ontology_array,$ontology_id);
-}	
-function sidora_search_ontology_for_concept_type($ontologytree,$ontology_id){
-  foreach ($ontologytree as $key=>$value) {
+
+function sidora_get_concept_type($ontology_id) {
+  $sidora_ontology_json = variable_get('sidora_ontology_json', sidora_ontology_json_default());
+  $sidora_ontology_array = json_decode($sidora_ontology_json, true);
+  return sidora_search_ontology_for_concept_type($sidora_ontology_array, $ontology_id);
+}
+
+function sidora_search_ontology_for_concept_type($ontologytree, $ontology_id) {
+  foreach ($ontologytree as $key => $value) {
     $obj = $ontologytree[$key];
-		if (isset($obj['ontology-id']) && ($obj['ontology-id'] == $ontology_id)){
+    if (isset($obj['ontology-id']) && ($obj['ontology-id'] == $ontology_id)) {
       return $key;
-		}elseif(is_array($obj['children']) && (count($obj['children']) >0)){
-		  $concept_type = sidora_search_ontology_for_concept_type($obj['children'],$ontology_id);
-		  if ($concept_type){
-			  return $concept_type;
-			}	
-		}
-	}			
+    }
+    elseif (is_array($obj['children']) && (count($obj['children']) > 0)) {
+      $concept_type = sidora_search_ontology_for_concept_type($obj['children'], $ontology_id);
+      if ($concept_type) {
+        return $concept_type;
+      }
+    }
+  }
   return FALSE;
 }
+
 function sidora_mail($from = 'default_from', $to, $subject, $message) {
   $my_module = '';
   $my_mail_token = '';
   if ($from == 'default_from') {
     $from = variable_get('system_mail', '');
   }
-	$message = array(
+  $message = array(
     'id' => $my_module . $my_mail_token,
     'to' => $to,
     'subject' => $subject,
     'body' => array($message),
     'headers' => array(
-      'From' => $from, 
-      'Sender' => $from, 
+      'From' => $from,
+      'Sender' => $from,
       'Return-Path' => $from,
     ),
   );
   $system = drupal_mail_system($my_module, $my_mail_token);
   $message = $system->format($message);
-	if ($system->mail($message)) {
+  if ($system->mail($message)) {
     return TRUE;
   }
   else {
     return FALSE;
   }
 }
+
 // function to convert a PHP array to valid xml file
-function sidora_array_to_xml( $data, &$xml_data, &$domtree ) {
-  foreach( $data as $key => $value ) {
-    if( is_numeric($key) ){
-      $key = 'item'.$key; //dealing with <0/>..<n/> issues
+function sidora_array_to_xml($data, &$xml_data, &$domtree) {
+  foreach ($data as $key => $value) {
+    if (is_numeric($key)) {
+      $key = 'item' . $key; //dealing with <0/>..<n/> issues
     }
-    if( is_array($value) ) {
+    if (is_array($value)) {
       $subnode = $domtree->createElement($key);
-			$subnode = $xml_data->appendChild($subnode);
-      sidora_array_to_xml($value, $subnode,$domtree);
-    } else {
-       $subnode = $domtree->createElement("$key",htmlspecialchars("$value"));
-			 $xml_data->appendChild($subnode);
+      $subnode = $xml_data->appendChild($subnode);
+      sidora_array_to_xml($value, $subnode, $domtree);
+    }
+    else {
+      $subnode = $domtree->createElement("$key", htmlspecialchars("$value"));
+      $xml_data->appendChild($subnode);
     }
   }
-
 }
+
 /**
  * Clean the filenames in batch ingest before sending them to the 
  * back-end via curl request. If not sanitized prior to sending,
  * Fedora REST wasn't able to handle filenames with spaces.
  * Code originally from http://cubiq.org/the-perfect-php-clean-url-generator
  */
-function sidora_toAscii($str,$delimiter='_') {
+function sidora_toAscii($str, $delimiter = '_') {
   setlocale(LC_ALL, 'en_US.UTF8');
-	$clean = iconv('UTF-8', 'ASCII//TRANSLIT', $str);
-	$clean = preg_replace("/[^a-zA-Z0-9.\/_|+ -]/", '', $clean);
-	$clean = strtolower(trim($clean, '-'));
-	$clean = preg_replace("/[\/_|+ -]+/", $delimiter, $clean);
-	return $clean;
+  $clean = iconv('UTF-8', 'ASCII//TRANSLIT', $str);
+  $clean = preg_replace("/[^a-zA-Z0-9.\/_|+ -]/", '', $clean);
+  $clean = strtolower(trim($clean, '-'));
+  $clean = preg_replace("/[\/_|+ -]+/", $delimiter, $clean);
+  return $clean;
 }
+
 ?>
